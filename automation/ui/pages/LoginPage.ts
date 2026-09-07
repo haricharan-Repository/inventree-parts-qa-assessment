@@ -29,8 +29,20 @@ export class LoginPage {
 
     await this.page.getByRole('button', { name: /log ?in|sign ?in/i }).click();
 
-    // Successful login lands on the authenticated dashboard/home — wait for the app shell's
-    // primary navigation rather than a fixed sleep.
+    // The very first request InvenTree's server handles after container startup — which is
+    // exactly what this is, the first thing CI does after `docker compose up` — is
+    // meaningfully slower than every request after it (Gunicorn/Django cold start: import
+    // caching, URL resolver, first DB connections). Confirmed against a genuinely fresh
+    // instance: the first login attempt after boot took 20s+ and never even redirected, while
+    // four immediately-following attempts each redirected in ~1.5-1.8s. CI hit this because
+    // `npm test` is the very first request the instance ever serves. A generous timeout on the
+    // redirect — the earliest, most fundamental signal of a successful login — absorbs that
+    // one-time cost instead of a short wait on a specific nav element, which was timing out
+    // before the redirect had even happened.
+    await this.page.waitForURL(/\/web\/(home|dashboard)/, { timeout: 60_000 });
+
+    // Once redirected, the app shell's own render is fast even on a cold instance — a normal
+    // timeout here is enough.
     await expect(this.page.getByRole('link', { name: /parts/i }).first()).toBeVisible({
       timeout: 20_000,
     });

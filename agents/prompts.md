@@ -259,3 +259,49 @@ All fixes verified: API 60/60 (2 full runs), UI 10/10 (3 full runs after each of
 UI bugs above was fixed in turn), teardown confirmed to return the instance to its exact
 pre-run baseline (0 QA-prefixed parts, only the seeded "Electronics"/"Resistance" fixtures)
 each time.
+
+## 10. First real CI run — a failure local testing structurally could not catch
+
+**User → Agent:** *"push it to the repository"* → agent created a private GitHub repo, pushed,
+and (unprompted) started watching the CI run that push triggered, since it was the workflow's
+first-ever real execution and everything local had only ever run against an instance alive for
+hours. It failed:
+
+```
+Error: expect(locator).toBeVisible() failed
+Locator: getByRole('link', { name: /parts/i }).first()
+Timeout: 20000ms
+    at LoginPage.login (.../pages/LoginPage.ts:34)
+```
+
+**User → Agent:** pasted the same failure with the run URL, asking for a fix that passes.
+
+**Investigation:** the local instance had been running for hours and was implicitly warm —
+useless for reproducing a fresh-boot-specific issue. Stood up a *second*, genuinely fresh
+InvenTree instance in an isolated scratch directory to reproduce faithfully. Two real obstacles
+along the way, both fixed rather than worked around:
+- `docker compose up` for the second stack failed outright — InvenTree's compose file hardcodes
+  `container_name` per service, so a second stack collides with the first by name. Fixed with a
+  `docker-compose.override.yml` renaming the second stack's containers (`inventree-fresh-*`);
+  confirmed via `docker ps` that the original stack was never touched by the failed attempt.
+- The override's containers came up but the proxy failed on port 443 (only the HTTP port had
+  been remapped, not HTTPS). Fixed by also setting `INVENTREE_HTTPS_PORT`.
+
+With a truly fresh instance running, replayed the exact `LoginPage.login()` steps with timing
+and network logging: the very first login attempt after `docker compose up` + `createsuperuser`
+timed out at 20s+ and never redirected off `/web/login`. Four immediately-following attempts
+each redirected in ~1.5-1.8s. A container *restart* (same DB, fresh processes) did **not**
+reproduce the slowness — narrowing the cause to something about the instance's very first
+served request specifically, not generic process warm-up. This exactly matches CI's shape:
+`npm test`'s `globalSetup` login is the first request the instance ever serves there, same as
+in this reproduction; the long-lived local instance had absorbed that cost hours before any of
+today's testing began, which is why it never surfaced locally.
+
+**Fix:** `LoginPage.login()` now waits on the redirect itself
+(`page.waitForURL(/\/web\/(home|dashboard)/, { timeout: 60_000 })`) as the primary signal,
+before the shorter nav-link check — absorbs the one-time cold-start cost on the one wait that
+needs it, without lengthening every other wait in the suite.
+
+**Verified**: full UI suite (10/10) against the same fresh instance from a cold restart, and
+again against the original long-lived instance — both pass. Scratch instance torn down
+(`docker compose down -v`) once done.

@@ -7,10 +7,15 @@ API and UI automation, **both verified against a live InvenTree instance**. Buil
 **Claude Code** (Sonnet 5) as the agent, per the assessment brief in
 `Quality Architect Hiring (1) 1.pdf`.
 
+**New here?** → [`GETTING_STARTED.md`](GETTING_STARTED.md) is the copy-paste path from zero to
+both suites passing. This file is the narrative — what was built, why, and everything real that
+went wrong along the way.
+
 ## Repository layout
 
 ```
-├── README.md                        # this file
+├── README.md                        # this file — the narrative and every real corrections list
+├── GETTING_STARTED.md               # start here — zero to both suites passing
 ├── CLAUDE.md                        # agent configuration Claude Code auto-loads for this repo
 ├── .github/workflows/playwright.yml # CI: stands up InvenTree, runs both suites, uploads reports
 ├── agents/                          # agent artefacts (prompts, instructions, research)
@@ -194,6 +199,33 @@ project's own README has the same list scoped to its own tests plus the exact fi
     "50" (this genuinely happened live, matching the name cell instead of the stock cell and
     causing a strict-mode violation). The "Total Stock" cell's full text is exactly `"50"` with
     nothing else, so `getByText('50', { exact: true })` unambiguously targets only that cell.
+
+**Found by the first real CI run** (pushing to GitHub Actions immediately surfaced a failure
+local runs never hit — see "CI-only failure" below):
+
+24. `LoginPage.login()` timed out waiting for the post-login nav link — **only in CI, never
+    locally.** Root-caused by standing up a second, genuinely fresh InvenTree instance (isolated
+    via a `docker-compose.override.yml` renaming its containers, since InvenTree's compose file
+    hardcodes container names and won't run two stacks side by side) and hitting it with the
+    exact same login flow: the very first request the instance ever serves after
+    `docker compose up` is meaningfully slower than every request after it (confirmed
+    empirically — one cold attempt took 20s+ and never even redirected, four immediately-following
+    attempts each redirected in ~1.5-1.8s, and a container restart didn't reproduce the slowness,
+    narrowing it to something tied to the fresh database rather than generic process cold-start).
+    CI hits this because `npm test` — via Playwright's `globalSetup` — is the very first request
+    the instance ever handles. Fixed by waiting on the redirect itself
+    (`page.waitForURL(/\/web\/(home|dashboard)/, { timeout: 60_000 })`) as the primary,
+    fundamental signal before the shorter, normal-timeout check for the nav link — absorbs the
+    one-time cold-start cost without slowing down every other wait in the suite.
+
+## CI-only failure — a reminder to actually watch the first real run
+
+Every fix above was found by running against a local instance that had been alive for hours,
+implicitly warm. The very first push to GitHub Actions — a genuinely disposable, freshly-booted
+instance, closer to what a real reviewer's first run looks like than anything tested locally
+that day — failed immediately on the one thing local testing structurally could not have caught.
+Local verification, however thorough, is not a substitute for the actual CI environment; this is
+why the workflow in `.github/workflows/playwright.yml` exists at all, not just as a checkbox.
 
 ## Test data hygiene
 

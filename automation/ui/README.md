@@ -140,3 +140,14 @@ refinement" the assessment's video requirement asks to capture:
     substring "50" — this genuinely happened live (a strict-mode violation matched the name cell
     instead of the stock cell). The "Total Stock" cell's full text is exactly `"50"` with nothing
     else in it, so `getByText('50', { exact: true })` unambiguously targets only that cell.
+
+**Found by the first real CI run**, not local testing (root README → "CI-only failure"):
+
+13. **`LoginPage.login()` timed out in CI but never locally.** The very first request an
+    InvenTree instance serves after `docker compose up` is meaningfully slower than every request
+    after it — confirmed by standing up a second, isolated fresh instance and measuring it
+    directly (one cold attempt: 20s+, never redirected; four immediately-following attempts:
+    ~1.5-1.8s each). CI hits this because `npm test`'s `globalSetup` login *is* that first
+    request. Fixed by waiting on the redirect itself
+    (`page.waitForURL(/\/web\/(home|dashboard)/, { timeout: 60_000 })`) before the shorter,
+    normal-timeout check for the nav link, rather than one 20s wait on the nav link alone.
