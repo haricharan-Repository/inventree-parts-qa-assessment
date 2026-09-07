@@ -1,0 +1,9 @@
+.claude/
+node_modules/
+dist/
+playwright-report/
+test-results/
+storageState.json
+.env
+*.log
+.DS_Store

@@ -1,0 +1,20 @@
+{
+  "name": "inventree-parts-ui-tests",
+  "version": "1.0.0",
+  "description": "UI automation for the InvenTree Parts module (Playwright, Page Object Model)",
+  "private": true,
+  "scripts": {
+    "seed": "node scripts/seed.js",
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "test:ui": "playwright test --ui",
+    "test:report": "playwright show-report",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.47.0",
+    "@types/node": "^20.14.0",
+    "dotenv": "^16.4.5",
+    "typescript": "^5.5.0"
+  }
+}
