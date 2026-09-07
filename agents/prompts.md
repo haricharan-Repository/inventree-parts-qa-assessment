@@ -208,3 +208,54 @@ static InvenTree docs simply don't cover several of these behaviours at all.
 - A stable "Electronics" category and "Resistance" parameter template don't exist on a fresh
   instance (two test cases reference them by name) — added an idempotent `npm run seed` script
   rather than have those tests silently fail on missing fixture data.
+
+## 9. Post-review hardening pass
+
+**User → Agent:** *"Think as a solution architect, and see this project is good or if needed any
+suggestions"* → agent gave an honest architectural review: strong traceability and genuine
+live-verification, but flagged five concrete gaps — no test-data teardown (with a live number:
+397 parts / 125 categories accumulated from the day's debugging), automated coverage silently
+narrower than the manual suite, `workers: 1` as an undiscussed tradeoff, unverified conditional
+UI tabs (BOM/Variants/Revisions/Test Templates), and no CI config.
+
+**User → Agent:** *"fix all these, and tell me why Playwright is better than selenium and other
+test frameworks"* → agent addressed each item:
+
+1. **Closed the tab-verification gap first** (cheapest, instance still running): created a real
+   `is_template=true, assembly=true, testable=true` part and a real revision pair via the API,
+   then read the live tab list. This *found two more genuine bugs* the original "inferred from
+   naming convention" tabs had gotten wrong — the BOM tab is actually labelled "Bill of
+   Materials", and there is no "Revisions" tab at all (the switcher lives inside "Part Details").
+2. **Built `scripts/teardown.js`** (both projects, wired as Playwright's `globalTeardown`) —
+   deletes every "QA "-prefixed Part/Category after a full run. First standalone run deleted the
+   397/125 backlog in one pass; testing it also *found two test-data names that didn't carry the
+   "QA " prefix* (a bare `Resistor<timestamp>` keyword, and the boundary-length string generator),
+   which is exactly the kind of thing a cleanup mechanism surfaces that manual review wouldn't.
+3. **Added the explicit "Automation coverage — what's automated vs backlog" section** to the root
+   README so the gap between 130+ manual cases and the automated subset reads as a documented
+   scoping decision, not an oversight.
+4. **Added `.github/workflows/playwright.yml`** — stands up InvenTree from a clone, runs both
+   suites, uploads HTML reports as artifacts.
+5. **`workers: 1` — deliberately left unchanged**, with the reasoning written down (root README →
+   "Post-review hardening"): pagination-count assertions and shared seed fixtures both assume the
+   current sequential ordering; parallelizing safely needs those rewritten first. Documented as a
+   conscious deferral rather than silently "fixed" in a way that would risk introducing flakiness.
+6. **Re-running the full UI suite after the teardown/naming fixes surfaced a further, unrelated
+   bug**: PC-06 started timing out, but only when run as part of the full suite (never in
+   isolation) — reproduced 2/2 times before the fix, then 0/3 times after. Root cause: the
+   category combobox renders an inline text preview of the matched value inside its own input
+   while filtering, which is a second, timing-dependent match for a bare
+   `getByText(categoryName)` alongside the real dropdown option. Fixed by scoping to
+   `getByRole('option', ...)`, matching the popover's real ARIA structure.
+
+7. **A further full-suite run after that fix surfaced a *third*, independent bug** in
+   `cross-functional-flow.spec.ts`: its final assertion, `getByText(/50/)`, was unanchored and
+   coincidentally matched the part's own name cell (the name embeds a millisecond timestamp for
+   uniqueness, which can itself contain the substring "50") instead of the intended stock-quantity
+   cell — a strict-mode violation. Verified the actual cell's full text is exactly `"50"` with
+   nothing else, then fixed with `getByText('50', { exact: true })`.
+
+All fixes verified: API 60/60 (2 full runs), UI 10/10 (3 full runs after each of the two
+UI bugs above was fixed in turn), teardown confirmed to return the instance to its exact
+pre-run baseline (0 QA-prefixed parts, only the seeded "Electronics"/"Resistance" fixtures)
+each time.

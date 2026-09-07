@@ -47,6 +47,14 @@ cp .env.example .env                 # edit BASE_URL / credentials if not using 
 npm run seed
 ```
 
+## Test data cleanup
+
+Every test names what it creates with a "QA " prefix. `playwright.config.ts` wires
+`scripts/teardown.js` as a `globalTeardown` — it runs once after the full suite finishes and
+deletes everything matching that prefix, so repeated runs don't accumulate data on a shared
+instance. It never touches the `npm run seed` fixtures ("Electronics", "Resistance"). Also
+runnable standalone: `npm run teardown`.
+
 ## Run
 
 ```bash
@@ -57,6 +65,9 @@ npx playwright test tests/part-crud.spec.ts
 
 `global-setup.ts` logs in once via the real login form and persists `storageState.json`, which
 every test then reuses — avoids re-authenticating per spec.
+
+Also runs in CI: `.github/workflows/playwright.yml` at the repo root stands up InvenTree from
+scratch, runs both suites, and uploads the HTML reports as build artifacts on every push/PR.
 
 ## Design notes
 
@@ -106,3 +117,26 @@ refinement" the assessment's video requirement asks to capture:
 8. **Parameter templates and a stable "Electronics" category don't exist on a fresh instance** —
    PC-06 and the cross-functional flow reference them by name, so `npm run seed` creates them
    (see "Setup" above) rather than the tests silently failing on missing fixture data.
+
+**Found during a later post-review hardening pass** (root `README.md` → "Post-review hardening"):
+
+9. **The category combobox renders an inline preview of the matched value inside the input
+   itself while filtering** — a second, ambiguous match for a bare `getByText(categoryName)`
+   alongside the real dropdown option. This caused PC-06 to intermittently time out, but only
+   when run as part of the full suite (never in isolation) — a render/GC-timing-dependent race,
+   not a deterministic failure, which made it easy to miss on a single passing run. Fixed by
+   scoping to `getByRole('option', { name: /category/ })`, matching the popover's real ARIA
+   structure (confirmed via `ariaSnapshot()`) — stable across 3 repeated full-suite runs after
+   the fix, where it had failed reliably before.
+10. **The BOM tab's real label is "Bill of Materials"**, not "BOM" — confirmed by creating an
+    actual `assembly=true` part rather than only spot-checking parts without that flag.
+11. **There is no "Revisions" tab at all.** Confirmed by creating a real revision pair: the
+    switcher is a "Select Part Revision" dropdown inside the *Part Details* tab's own content, not
+    a sibling tab. `PartTab` no longer includes a tab that never existed; use
+    `expectRevisionSelectorVisible()` instead of `openTab('Revisions')`.
+12. **The cross-functional flow's final assertion used an unanchored `getByText(/50/)`** to
+    confirm a stock quantity appeared in a category's part list row. Every test part's name
+    embeds a millisecond timestamp for uniqueness, which can itself coincidentally contain the
+    substring "50" — this genuinely happened live (a strict-mode violation matched the name cell
+    instead of the stock cell). The "Total Stock" cell's full text is exactly `"50"` with nothing
+    else in it, so `getByText('50', { exact: true })` unambiguously targets only that cell.

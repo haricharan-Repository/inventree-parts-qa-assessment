@@ -5,6 +5,7 @@
   "private": true,
   "scripts": {
     "seed": "node scripts/seed.js",
+    "teardown": "node scripts/teardown.js",
     "test": "playwright test",
     "test:headed": "playwright test --headed",
     "test:ui": "playwright test --ui",

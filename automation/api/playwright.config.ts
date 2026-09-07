@@ -11,6 +11,9 @@ export default defineConfig({
   workers: 1,
   retries: process.env.CI ? 1 : 0,
   reporter: [['list'], ['html', { open: 'never' }]],
+  // Deletes every "QA "-prefixed Part/Category this run created, once, after the whole suite
+  // finishes (pass or fail) — see scripts/teardown.js for why this exists and how it works.
+  globalTeardown: require.resolve('./scripts/teardown.js'),
   use: {
     baseURL: process.env.BASE_URL ?? 'http://localhost:8000',
     extraHTTPHeaders: {

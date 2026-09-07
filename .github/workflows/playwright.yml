@@ -1,0 +1,147 @@
+name: Playwright — InvenTree Parts automation
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# InvenTree's own docker-compose stack isn't a single container, so it can't be a GitHub Actions
+# `services:` entry (that only supports one container per service) — it's brought up as an
+# explicit step instead, against a throwaway clone.
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: http://localhost:8000
+      INVENTREE_USERNAME: admin
+      INVENTREE_PASSWORD: inventree
+      READONLY_USERNAME: readonly
+      READONLY_PASSWORD: readonlypass
+
+    steps:
+      - name: Check out this repo
+        uses: actions/checkout@v4
+
+      - name: Clone InvenTree
+        run: git clone --depth 1 https://github.com/inventree/InvenTree.git /tmp/InvenTree
+
+      - name: Pin the compose stack's published port
+        run: echo "INVENTREE_HTTP_PORT=8000" >> /tmp/InvenTree/contrib/container/.env
+
+      - name: Start InvenTree (docker compose)
+        working-directory: /tmp/InvenTree/contrib/container
+        run: docker compose up -d
+
+      - name: Wait for the InvenTree server to report healthy
+        working-directory: /tmp/InvenTree/contrib/container
+        run: |
+          for i in $(seq 1 60); do
+            if docker compose ps --format '{{.Service}}: {{.Status}}' | grep -qE 'inventree-server.*\(healthy\)'; then
+              echo "InvenTree server is healthy."
+              exit 0
+            fi
+            if docker compose ps --format '{{.Service}}: {{.Status}}' | grep -qiE 'exited|dead'; then
+              echo "A container exited unexpectedly:"
+              docker compose ps
+              exit 1
+            fi
+            sleep 10
+          done
+          echo "Timed out waiting for InvenTree to become healthy."
+          docker compose ps
+          docker compose logs --tail=100
+          exit 1
+
+      # The stock image doesn't run collectstatic on first boot, so the Platform UI's own JS
+      # bundle 404s until this runs — see README.md "Corrections made against the live instance" #1.
+      - name: Collect InvenTree static files
+        working-directory: /tmp/InvenTree/contrib/container
+        run: docker compose exec -T inventree-server invoke static
+
+      # No superuser is auto-created unless INVENTREE_ADMIN_* was set before first boot — see
+      # README.md "Corrections made against the live instance" #2.
+      - name: Create InvenTree admin superuser
+        working-directory: /tmp/InvenTree/contrib/container
+        run: |
+          docker compose exec -T \
+            -e DJANGO_SUPERUSER_USERNAME=$INVENTREE_USERNAME \
+            -e DJANGO_SUPERUSER_EMAIL=admin@example.com \
+            -e DJANGO_SUPERUSER_PASSWORD=$INVENTREE_PASSWORD \
+            inventree-server sh -c "cd src/backend/InvenTree && python3 manage.py createsuperuser --noinput"
+
+      # API-E-03 (insufficient-permission check) needs a second, non-admin user with a
+      # UserProfile row — see README.md correction #3 for why the profile row matters.
+      - name: Create read-only InvenTree user
+        working-directory: /tmp/InvenTree/contrib/container
+        run: |
+          # Unquoted heredoc delimiter (<<PY, not <<'PY') is deliberate — it's what lets the
+          # outer shell expand $READONLY_USERNAME/$READONLY_PASSWORD below before the heredoc
+          # body is sent to the container's stdin. A quoted delimiter would pass those two
+          # variable references through as literal text instead of their values.
+          docker compose exec -T inventree-server sh -c "cd src/backend/InvenTree && python3 manage.py shell -v 0" <<PY
+          from django.contrib.auth import get_user_model
+          from users.models import UserProfile
+          User = get_user_model()
+          u, _ = User.objects.get_or_create(username="$READONLY_USERNAME", defaults={"email": "readonly@example.com"})
+          u.set_password("$READONLY_PASSWORD")
+          u.is_superuser = False
+          u.save()
+          UserProfile.objects.get_or_create(user=u)
+          PY
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            automation/api/package-lock.json
+            automation/ui/package-lock.json
+
+      # --- API suite ---
+      - name: Install API test dependencies
+        working-directory: automation/api
+        run: npm ci
+
+      - name: Run API tests
+        working-directory: automation/api
+        run: npm test
+
+      - name: Upload API Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-playwright-report
+          path: automation/api/playwright-report/
+          retention-days: 14
+
+      # --- UI suite ---
+      - name: Install UI test dependencies
+        working-directory: automation/ui
+        run: npm ci
+
+      - name: Install Playwright browsers (chromium)
+        working-directory: automation/ui
+        run: npx playwright install --with-deps chromium
+
+      - name: Seed UI fixtures (Electronics category, Resistance parameter template)
+        working-directory: automation/ui
+        run: npm run seed
+
+      - name: Run UI tests
+        working-directory: automation/ui
+        run: npm test
+
+      - name: Upload UI Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-playwright-report
+          path: automation/ui/playwright-report/
+          retention-days: 14
+
+      - name: Dump InvenTree server logs on failure
+        if: failure()
+        working-directory: /tmp/InvenTree/contrib/container
+        run: docker compose logs --tail=200

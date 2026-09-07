@@ -1,9 +1,17 @@
 import { Page, expect } from '@playwright/test';
 
-/** Tabs confirmed present for a plain (non-assembly, non-template, non-testable) part on a
- * live instance. BOM/Variants/Revisions/Test Templates were not independently re-verified
- * (they require assembly/is_template/testable parts respectively) but follow the same naming
- * convention as the confirmed tabs — flag any mismatch here as a further correction. */
+/**
+ * All tab names below are now verified against a live instance, including the conditional ones
+ * — created a part with `is_template=true, assembly=true, testable=true` simultaneously and a
+ * separate revision pair to check. Two real corrections came out of that:
+ *   - The BOM tab's actual label is **"Bill of Materials"**, not "BOM" (the guessed name).
+ *   - There is **no "Revisions" tab at all.** The revision switcher is a "Select Part Revision"
+ *     dropdown rendered inside the *Part Details* tab's own content, not a sibling tab — the
+ *     original `PartTab` type included a tab that has never existed. It doesn't appear in this
+ *     union for that reason (see `expectRevisionSelectorVisible` for the actual widget).
+ * "Build Orders" was also confirmed for real (present for the assembly part) — not previously
+ * spot-checked.
+ */
 export type PartTab =
   | 'Part Details'
   | 'Stock'
@@ -12,13 +20,13 @@ export type PartTab =
   | 'Part Pricing'
   | 'Suppliers'
   | 'Purchase Orders'
+  | 'Build Orders'
   | 'Related Parts'
   | 'Parameters'
   | 'Attachments'
   | 'Notes'
-  | 'BOM'
+  | 'Bill of Materials'
   | 'Variants'
-  | 'Revisions'
   | 'Test Templates';
 
 export class PartDetailPage {
@@ -44,6 +52,18 @@ export class PartDetailPage {
     await expect(tabControl).toBeVisible({ timeout: 10_000 });
     await tabControl.click();
     await expect(tabControl).toHaveAttribute('aria-selected', 'true');
+  }
+
+  /** PDV-17/18: the revision switcher — confirmed live as a "Select Part Revision" widget
+   * inside the Part Details tab's own content, not a separate tab (see the PartTab doc comment). */
+  async expectRevisionSelectorVisible(expected: boolean) {
+    await this.openTab('Part Details');
+    const selector = this.page.getByText('Select Part Revision', { exact: true });
+    if (expected) {
+      await expect(selector).toBeVisible({ timeout: 10_000 });
+    } else {
+      await expect(selector).toHaveCount(0);
+    }
   }
 
   async expectTabHidden(tab: PartTab) {

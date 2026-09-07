@@ -74,7 +74,13 @@ export class PartsListPage {
 
     if (fields.category) {
       await dialog.getByRole('textbox', { name: 'tree-field-category' }).fill(fields.category);
-      await this.page.getByText(fields.category, { exact: true }).click();
+      // Not a bare getByText(category) — the combobox input itself renders an inline preview of
+      // the matched value as its own text node while filtering, which is a second, ambiguous
+      // match for that category name alongside the real dropdown option. This surfaced as an
+      // intermittent click-timeout that only reproduced when this test ran after others in the
+      // same suite (render/GC timing-dependent, not deterministic in isolation) — confirmed via
+      // ariaSnapshot() that the popover's options carry a proper `option` role, so scope to that.
+      await this.page.getByRole('option', { name: new RegExp(fields.category) }).click();
     }
 
     await this.submitOpenForm();

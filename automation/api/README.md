@@ -63,6 +63,14 @@ PY
 Set `READONLY_USERNAME` / `READONLY_PASSWORD` in `.env` to match; the test is skipped (not
 failed) if these are left blank.
 
+## Test data cleanup
+
+Every test names what it creates with a "QA " prefix (see `utils/testData.ts`).
+`playwright.config.ts` wires `scripts/teardown.js` as a `globalTeardown` — it runs once after the
+full suite finishes and deletes everything matching that prefix (parts, their BOM lines,
+categories), so repeated runs don't accumulate data on a shared instance. Also runnable
+standalone: `npm run teardown`.
+
 ## Run
 
 ```bash
@@ -70,6 +78,9 @@ npm test               # headless run, HTML report generated
 npm run test:report    # open the last HTML report
 npx playwright test tests/parts-crud.spec.ts   # run a single file
 ```
+
+Also runs in CI: `.github/workflows/playwright.yml` at the repo root stands up InvenTree from
+scratch, runs both suites, and uploads the HTML reports as build artifacts on every push/PR.
 
 Tests run with `workers: 1` (see `playwright.config.ts`) because several suites share mutable
 server-side state (categories, IPNs); this keeps runs deterministic at the cost of some wall-clock
@@ -134,3 +145,11 @@ video requirement asks to capture:
 10. A boundary-length test (API-V-03) used a fixed 100-`A` string for `name`, which collided with
     itself on repeated suite runs (`Part.name` is part of a `(name, IPN, revision)` uniqueness
     set). Fixed with a unique-but-still-exactly-100-char generator (`uniqueStringOfLength`).
+
+**Found during a later post-review hardening pass** (root `README.md` → "Post-review hardening"):
+
+11. Two test-data names didn't carry the "QA " prefix `scripts/teardown.js` matches on — a
+    `Resistor<timestamp>` search keyword (API-F-01) and `uniqueStringOfLength`'s own output
+    (API-V-03). Found only once teardown existed to notice untracked rows leaking past it — a
+    day's worth of manual live-debugging had left 397 parts and 125 categories on the instance
+    before this was caught. Both fixed to carry the prefix.

@@ -11,7 +11,9 @@ import { randomPartName, randomIpn } from '../utils/testData';
 
 test.describe('Parts list — filtering, pagination, search', () => {
   test('API-F-01: search by keyword matches name', async ({ authedRequest }) => {
-    const keyword = `Resistor${Date.now()}`;
+    // "QA" prefix so scripts/teardown.js can find and clean this up — an earlier version of
+    // this test used a bare "Resistor<timestamp>" keyword and leaked untracked test data.
+    const keyword = `QAResistor${Date.now()}`;
     await authedRequest.post('/api/part/', { data: { name: `${keyword} 10k` } });
 
     const res = await authedRequest.get(`/api/part/?search=${keyword}&limit=50`);

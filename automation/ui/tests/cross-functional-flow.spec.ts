@@ -43,7 +43,13 @@ test('cross-functional: create part -> add parameter -> add stock -> verify in c
 
     // The category's part list surfaces total in-stock quantity per row — confirm the
     // stock created above is reflected there, not just that the row exists.
+    //
+    // Not `getByText(/50/)` (unanchored): the part name embeds a millisecond timestamp for
+    // uniqueness, which can itself coincidentally contain the substring "50" (confirmed live —
+    // this genuinely happened and matched the name cell instead of the stock cell). The Total
+    // Stock cell's full text is exactly "50" with nothing else in it, so an exact match
+    // unambiguously targets only that cell.
     const row = page.getByRole('row', { name: new RegExp(partName, 'i') });
-    await expect(row.getByText(/50/)).toBeVisible({ timeout: 15_000 });
+    await expect(row.getByText('50', { exact: true })).toBeVisible({ timeout: 15_000 });
   });
 });

@@ -23,10 +23,12 @@ export function stringOfLength(length: number, char = 'A'): string {
  * A string of exactly `length` characters that's unique per call, for boundary-length tests on
  * fields InvenTree enforces uniqueness on (e.g. Part.name is part of a (name, IPN, revision)
  * uniqueness set) — a fixed repeated-char string collides with itself across repeated test runs
- * otherwise. Falls back to plain `stringOfLength` if the suffix wouldn't fit.
+ * otherwise. Starts with "QA" wherever it fits so `scripts/teardown.js` (which matches on that
+ * prefix) can find and delete it — omitting this was itself a bug caught by running teardown
+ * and finding leftover un-prefixed parts it couldn't identify as test data.
  */
 export function uniqueStringOfLength(length: number, char = 'A'): string {
-  const suffix = uniqueSuffix();
-  if (suffix.length >= length) return suffix.slice(0, length);
-  return suffix + char.repeat(length - suffix.length);
+  const marked = `QA${uniqueSuffix()}`;
+  if (marked.length >= length) return marked.slice(0, length);
+  return marked + char.repeat(length - marked.length);
 }

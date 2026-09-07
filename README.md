@@ -12,6 +12,7 @@ API and UI automation, **both verified against a live InvenTree instance**. Buil
 ```
 ├── README.md                        # this file
 ├── CLAUDE.md                        # agent configuration Claude Code auto-loads for this repo
+├── .github/workflows/playwright.yml # CI: stands up InvenTree, runs both suites, uploads reports
 ├── agents/                          # agent artefacts (prompts, instructions, research)
 │   ├── prompts.md                   # chronological prompt log
 │   ├── system-instructions.md       # operating brief the agent worked under
@@ -23,7 +24,9 @@ API and UI automation, **both verified against a live InvenTree instance**. Buil
 │   └── api-manual-tests.md          # Phase 2 — 50+ API manual test cases
 ├── automation/
 │   ├── api/                         # Phase 2 — runnable Playwright API test project (60/60 passing live)
+│   │   └── scripts/teardown.js      # deletes this run's QA-prefixed test data (globalTeardown)
 │   └── ui/                          # Phase 3 — runnable Playwright UI test project, POM (10/10 passing live)
+│       └── scripts/{seed,teardown}.js
 └── video/                           # Phase C deliverable — NOT YET RECORDED, see video/README.md
 ```
 
@@ -168,6 +171,87 @@ project's own README has the same list scoped to its own tests plus the exact fi
     category name for a root category, so `.first()` is required to disambiguate.
 18. A stable "Electronics" category and "Resistance" parameter template don't exist on a fresh
     instance — added `npm run seed` rather than have two test cases silently fail on missing data.
+
+**Found during a post-review hardening pass** (see "Post-review hardening" below):
+19. The "Add Part" category combobox renders an inline text preview of the matched value inside
+    the input itself while filtering — a second, ambiguous match for a bare
+    `getByText(categoryName)` alongside the real dropdown option. This caused an intermittent
+    click-timeout on PC-06 that reproduced reliably when run as part of the full suite but not in
+    isolation (render/GC timing-dependent). Fixed by scoping to `getByRole('option', ...)`,
+    matching the popover's real ARIA structure — confirmed stable across 3 repeated full-suite runs.
+20. The guessed BOM tab name ("BOM") was wrong — the real tab, confirmed by creating an actual
+    assembly/template/testable part, is labelled **"Bill of Materials"**.
+21. There is **no separate "Revisions" tab at all** — confirmed by creating a real revision pair.
+    The revision switcher is a "Select Part Revision" dropdown rendered inside the *Part Details*
+    tab's own content. The original `PartTab` type included a tab that never existed.
+22. Two test-data name literals didn't carry the "QA " prefix every other test uses (a
+    `Resistor<timestamp>` search keyword, and the boundary-length string generator) — found only
+    once a cleanup script existed to *notice* untracked data was leaking past it. Both fixed to
+    carry the prefix.
+23. The cross-functional flow's final assertion used an unanchored `getByText(/50/)` to confirm a
+    stock quantity appeared in a category's part list row — but every test part's name embeds a
+    millisecond timestamp for uniqueness, which can itself coincidentally contain the substring
+    "50" (this genuinely happened live, matching the name cell instead of the stock cell and
+    causing a strict-mode violation). The "Total Stock" cell's full text is exactly `"50"` with
+    nothing else, so `getByText('50', { exact: true })` unambiguously targets only that cell.
+
+## Test data hygiene
+
+Every test names what it creates with a "QA " prefix (see `automation/api/utils/testData.ts`).
+Each project's `playwright.config.ts` wires a `globalTeardown` (`scripts/teardown.js`) that
+deletes everything matching that prefix once, after the full suite finishes — so repeated runs
+against a shared instance don't accumulate data forever. It does **not** touch the `npm run seed`
+fixtures ("Electronics", "Resistance"), since neither starts with "QA ". Runnable standalone too:
+`npm run teardown` in either project.
+
+This was added after discovering — by actually counting rows on the live instance used for the
+"Corrections made against the live instance" work above — that a day of iterative debugging had
+left **397 parts and 125 categories** behind on what started as a fresh install. The teardown
+script cleaned up 100% of them on its first run once every test's naming was made consistent
+(finding and fixing the two non-conforming names in correction #22 above was itself a direct
+result of testing the teardown against real accumulated data).
+
+## Automation coverage — what's automated vs backlog
+
+The automation suites implement the **highest-value subset** of the manual test cases, not full
+parity with all 130+ of them — intentional scoping, made explicit here rather than left as an
+implicit gap:
+
+**Automated (API):** CRUD on parts/categories, filtering/pagination/search, field-level
+validation (required/max-length/nullable/read-only/type coercion), revision validation rules
+(circular reference, template restriction, duplicate revision code), relational integrity
+(category assignment, BOM component/sub-component rules, category-delete reassignment), and
+auth/edge cases (unauthenticated, insufficient permission, malformed payloads, SQL-injection-style
+input).
+
+**Automated (UI):** part creation (manual, with/without category), required-field validation,
+adding a parameter, creating a stock item, conditional-tab visibility (Variants/Test Templates
+hidden for a plain part), part deletion (including the deactivate-first requirement), and the
+required cross-functional flow (create → parameter → stock → category view).
+
+**Not yet automated** (documented backlog, not an accident):
+- Part **import/bulk-import** flow (`test-cases/ui-manual-tests.md` PI-01..06)
+- **Variant creation** flow and template/variant stock consolidation (PDV-14..16)
+- **Test Template** creation and required-test enforcement on stock results (PDV-23..26)
+- Full **BOM lifecycle** via the UI (add/edit/remove lines, not just the API-level component rule)
+- **Attachments** upload/delete, **Related Parts** linking (PDV-19..21)
+- **Units of measure** edge cases — engineering notation, custom units, imperial shorthand (UOM-02..06)
+- **Category** structural/default-location inheritance (CAT-07..08)
+- **Concurrency** scenarios — concurrent edit conflicts, DELETE race conditions beyond the basic
+  idempotency check already covered (NEG-07, API-E-08)
+
+## Post-review hardening
+
+After an initial "is this good, any suggestions?" architectural review, the following were added:
+a `globalTeardown` in both projects (see "Test data hygiene" above), the explicit coverage-backlog
+list above, a GitHub Actions workflow (`.github/workflows/playwright.yml` — stands up InvenTree,
+runs both suites, uploads HTML reports as artifacts), and closing the one remaining
+unverified-selector risk (corrections #19-22 above). One suggestion — enabling `fullyParallel`/
+multiple workers — was deliberately **not** applied: several tests (the pagination assertions in
+`API-F-08/09`, the shared "Electronics"/"Resistance" seed fixtures) assume the sequential,
+single-worker ordering this suite already relies on; parallelizing safely would need those
+rewritten to not depend on total counts or shared fixture state first. Documented here as a
+conscious deferral, not an oversight.
 
 ## Video
 
